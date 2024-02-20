@@ -8,12 +8,9 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    bear-fix = {
-      url = "github:emilazy/nixpkgs/fix-bear";
-    };
   };
 
-  outputs = inputs@{ self, nixpkgs, utils, fenix, bear-fix }:
+  outputs = inputs@{ self, nixpkgs, utils, fenix}:
     utils.lib.eachDefaultSystem (system:
     let
         fenixStable = fenix.packages.${system}.stable.withComponents [ "cargo" "clippy" "rust-src" "rustc" "rustfmt" "llvm-tools-preview" ];
@@ -30,8 +27,11 @@
             '';
             RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
             # DYLD_LIBRARY_PATH = "${pkgs.openblas}/lib";
+            LD_LIBRARY_PATH = "${pkgs.openssl.out}/lib:${pkgs.libtorch-bin}/lib";
+            LIBTORCH="${pkgs.libtorch-bin}";
             buildInputs =
               with pkgs; [
+                libtorch-bin
                 openblas
                 # rust-src
                 pkg-config
@@ -43,14 +43,14 @@
                 # rustc
                 nix
                 nix.dev
-                bear-fix.legacyPackages.${system}.bear
-                # bear
                 rust-cbindgen # for executable cbindgen
                 clang-tools_15 # for up to date clangd
                 clang_11
                 boost
                 protobuf
                 pkg-config
+                openssl.dev
+                openssl
               ] ++
               pkgs.lib.optionals stdenv.isDarwin [
                 darwin.apple_sdk.frameworks.Security

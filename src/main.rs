@@ -7,11 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 
 // TODOS:
-// - fix batching because they actually do that
 // - fix the output sizes because while we kinda need that, it's also eh
-// - fix the embedding idea
 // - implement loss correctly
 // - fix gradient descent to match textbook
+// - check windowing behaviour, it might be wrong..
 
 static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
@@ -20,19 +19,21 @@ const WINDOW_SIZE: usize = 2;
 const VOCAB_SIZE: usize = 2180152;
 const EMBEDDING_SIZE: usize = 256;
 
+pub type DEVICE = burn::backend::ndarray::NdArray;
+
 
 pub fn main() {
-    use burn::backend::libtorch::{LibTorch, LibTorchDevice};
-    let device = LibTorchDevice::Cpu;
+    use burn::backend::ndarray::{NdArrayDevice};
+    let device = NdArrayDevice::Cpu;
 
-    let data : [[i32; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
-    let mapped_data : Vec<Tensor<Autodiff<LibTorch>, 1, Int>> = data.into_iter().map(|item| Data::<i32, 1>::from(item))
-        .map(|data| Tensor::<Autodiff<LibTorch>, 1, Int>::from_data(data.convert(), &device))
+    let data : [[[i32; 3]; 2]; 2] = [[[1, 2, 3], [4, 5, 6]], [[1, 2, 3], [4, 5, 6]]];
+    let mapped_data : Vec<Tensor<Autodiff<DEVICE>, 2, Int>> = data.into_iter().map(|item| Data::<i32, 2>::from(item))
+        .map(|data| Tensor::<Autodiff<DEVICE>, 2, Int>::from_data(data.convert(), &device))
         .collect()
 
         ;
 
-    let stacked_data = Tensor::<Autodiff<LibTorch>, 1, Int>::stack::<2>(mapped_data, 0);
+    let stacked_data = Tensor::<Autodiff<DEVICE>, 2, Int>::stack::<3>(mapped_data, 0);
 
     panic!("And we're done {:?}", stacked_data);
     let dataset = load_json_playlists(DATA_DIR.to_string());
@@ -81,7 +82,7 @@ pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u3
 #[derive(Clone, Debug)]
 pub struct MyDataItem {
     input: [i32; VOCAB_SIZE],
-    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2 + 1]
+    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2]
 }
 
 pub fn gen_mapping(dataset: HashSet<(String, String)>) -> HashMap<(String, String), u32>{
@@ -173,9 +174,9 @@ struct PlaylistToItems;
 #[derive(Clone, Debug)]
 pub struct MyDataBatch<B: Backend> {
     // name is a vector
-    pub song_artist_as_vec_list: Tensor<B, 1, Int>,
+    pub song_artist_as_vec_list: Tensor<B, 2, Int>,
     // targets is a vector of vectors
-    pub targets: Tensor<B, 2, Int>,
+    pub targets: Tensor<B, 3, Int>,
     _pd: PhantomData<B>
 }
 
@@ -206,8 +207,8 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
             .collect()
             ;
         MyDataBatch {
-            song_artist_as_vec_list: Tensor::cat(inputs, 0).to_device(&self.device),
-            targets: Tensor::cat(outputs, 0).to_device(&self.device),
+            song_artist_as_vec_list: Tensor::stack(inputs, 0).to_device(&self.device),
+            targets: Tensor::stack(outputs, 0).to_device(&self.device),
             _pd: PhantomData,
         }
     }

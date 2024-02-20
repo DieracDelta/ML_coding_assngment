@@ -12,17 +12,17 @@ burn = { version = "0.12.1", features = [
         "metrics",
         "dataset",
         "sqlite",
-        "tch",
+        # "tch",
         "autodiff",
         "doc",
         "burn-train",
         "vision",
         "fusion",
         "experimental-named-tensor",
-        "metal",
+        # "metal", # only macos
         "ndarray",
         "record-item-custom-serde",
-        "accelerate",
+        # "accelerate",
         "wgpu"
 ]}
 serde_json = { version = "1.0.113" }

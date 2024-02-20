@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "bear-fix": {
-      "locked": {
-        "lastModified": 1687163274,
-        "narHash": "sha256-7W1TQdZkTPu9x/0j1NjPulAEnXfnEYsNtYnFz16hf/U=",
-        "owner": "emilazy",
-        "repo": "nixpkgs",
-        "rev": "c26b580c8cb6b1b9deeb26817d0bc12392f80391",
-        "type": "github"
-      },
-      "original": {
-        "owner": "emilazy",
-        "ref": "fix-bear",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "fenix": {
       "inputs": {
         "nixpkgs": [
@@ -55,7 +39,6 @@
     },
     "root": {
       "inputs": {
-        "bear-fix": "bear-fix",
         "fenix": "fenix",
         "nixpkgs": "nixpkgs",
         "utils": "utils"
