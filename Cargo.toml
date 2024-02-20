@@ -6,6 +6,24 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-burn = { version = "0.12.1", features = ["train", "tui", "metrics", "dataset", "sqlite", "tch", "autodiff", "doc", "burn-train", "vision", "fusion", "experimental-named-tensor", "metal", "ndarray", "record-item-custom-serde", "accelerate", "wgpu"]}
+burn = { version = "0.12.1", features = [
+        "train",
+        "tui",
+        "metrics",
+        "dataset",
+        "sqlite",
+        "tch",
+        "autodiff",
+        "doc",
+        "burn-train",
+        "vision",
+        "fusion",
+        "experimental-named-tensor",
+        "metal",
+        "ndarray",
+        "record-item-custom-serde",
+        "accelerate",
+        "wgpu"
+]}
 serde_json = { version = "1.0.113" }
 serde = { version = "1.0.196" }
