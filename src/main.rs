@@ -1,26 +1,99 @@
-use std::{marker::PhantomData};
+use std::{collections::{HashMap, HashSet}, marker::PhantomData};
 
-use burn::{config::Config, data::{dataloader::batcher::Batcher, dataset::{Dataset, InMemDataset}}, module::Module, nn::{Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, AdamConfig}, record::CompactRecorder, tensor::{backend::{AutodiffBackend, Backend}, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition}};
+use burn::{config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::Module, nn::{Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, AdamConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
+use burn::tensor::ElementConversion;
+use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+
+// TODOS:
+// - fix batching because they actually do that
+// - fix the output sizes because while we kinda need that, it's also eh
+// - fix the embedding idea
+// - implement loss correctly
+// - fix gradient descent to match textbook
 
 static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
 
+const WINDOW_SIZE: usize = 2;
+const VOCAB_SIZE: usize = 2180152;
+const EMBEDDING_SIZE: usize = 256;
+
+
 pub fn main() {
-    let dataframe = load_json_playlists(DATA_DIR.to_string());
-    println!("DATASET: {:?}", <InMemDataset<_> as Dataset<_>>::get(&dataframe, 0));
+    let dataset = load_json_playlists(DATA_DIR.to_string());
+    let (vocab, vocab_size) = gen_stats(dataset);
+    // println!("DATASET: {:?}", <InMemDataset<_> as Dataset<_>>::get(&dataframe, 0));
+    //
+    println!("num distinct tracks: {:?}", vocab_size);
+
+    let mapping = gen_mapping(vocab);
+
+
+
     // let device = Tensor::<f32>::device();
     // do_training::<f32>(device);
 }
 
+pub fn one_hot_vec(idx: i32) -> [i32; VOCAB_SIZE] {
+    let mut output = [0; VOCAB_SIZE];
+    output[idx as usize] = 1;
+    output
+}
+
+pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u32>) -> InMemDataset<MyDataItem>{
+    let mut dataset : Vec<MyDataItem> = vec![];
+
+    for playlist in data {
+        let tracks = playlist.tracks;
+        for window in tracks.windows(WINDOW_SIZE * 2 + 1) {
+            let outputs = &window[0..WINDOW_SIZE].iter().chain(window[WINDOW_SIZE + 2..].iter());
+
+            let input_track = &window[WINDOW_SIZE + 1];
+            let track_idx = *mapping.get(&(input_track.artist_name.to_lowercase(), input_track.track_name.to_lowercase())).unwrap() as i32;
+
+
+
+            dataset.push(MyDataItem {
+                input: one_hot_vec(track_idx),
+                output: outputs.map(|track| *mapping.get(&(input_track.artist_name.to_lowercase(), input_track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap()
+            });
+        }
+    }
+
+    InMemDataset::new(dataset)
+}
+
+#[derive(Clone, Debug)]
+pub struct MyDataItem {
+    input: [i32; VOCAB_SIZE],
+    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2 + 1]
+}
+
+pub fn gen_mapping(dataset: HashSet<(String, String)>) -> HashMap<(String, String), u32>{
+    dataset.iter().enumerate().map(|(i, x)| (x.clone(), i as u32)).collect()
+}
+
+pub fn gen_stats(dataset: InMemDataset<PlayList>) -> (HashSet<(String, String)>, usize) {
+    let mut all_songs :HashSet<(String, String)> = HashSet::new();
+
+    for playlist in dataset.iter() {
+        for track in playlist.tracks.iter() {
+            all_songs.insert((track.artist_name.to_lowercase().clone(), track.track_name.to_lowercase().clone()));
+        }
+    }
+    let len = all_songs.len();
+    (all_songs, len)
+}
+
 #[derive(Module, Debug)]
 pub struct MyModel<B: Backend> {
-    embedded: Embedding<B>
+    embedded: Embedding<B>,
 }
 
 impl<B: Backend> MyModel<B> {
-    pub fn parmeters(){
+    pub fn parameters(){
 
     }
 }
@@ -68,24 +141,25 @@ pub struct Track {
 #[derive(Config)]
 pub struct MyTrainingConfig {
     #[config(default = 10)]
-    pub num_epochs: isize,
-
-    #[config(default = 64)]
-    pub batch_size: usize,
-
-    #[config(default = 4)]
-    pub num_workers: usize,
+    pub num_epochs: usize,
 
     #[config(default = 42)]
     pub seed: u64,
 
+    #[config(default = 5)]
+    pub window: usize,
+
     pub optimizer: AdamConfig
 }
 
-pub struct MyDataItem {
-}
+struct PlaylistToItems;
 
+#[derive(Clone, Debug)]
 pub struct MyDataBatch<B: Backend> {
+    // name is a vector
+    pub song_artist_as_vec_list: Tensor<B, 1, Int>,
+    // targets is a vector of vectors
+    pub targets: Tensor<B, 2, Int>,
     _pd: PhantomData<B>
 }
 
@@ -103,7 +177,23 @@ impl<B: Backend> MyDataBatcher<B> {
 
 impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
     fn batch(&self, items: Vec<MyDataItem>) -> MyDataBatch<B> {
-        todo!()
+        let inputs : Vec<Tensor<B, 1, Int>> =
+            items
+            .iter()
+            .map(|item| Data::<i32,1>::from(item.input))
+            .map(|data| Tensor::<B, 1, Int>::from_data(data.convert(), &self.device)).collect();
+        let outputs : Vec<Tensor<B, 2, Int>> =
+            items
+            .iter()
+            .map(|item| Data::<i32, 2>::from(item.output))
+            .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
+            .collect()
+            ;
+        MyDataBatch {
+            song_artist_as_vec_list: Tensor::cat(inputs, 0).to_device(&self.device),
+            targets: Tensor::cat(outputs, 0).to_device(&self.device),
+            _pd: PhantomData,
+        }
     }
 }
 // iterate through all files in the directory `path`
@@ -125,58 +215,95 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
     InMemDataset::new(dataset)
 }
 
+impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
+    fn step(&self, MyDataBatch { song_artist_as_vec_list, targets, _pd } : MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+        let input = song_artist_as_vec_list;
+        /// need to cat all the tensors together.
+        let output = Tensor::reshape(targets, todo!());
+        self.embedded.forward();
+
+
+        todo!()
+        // let item = self.forward_classification(item);
+        //
+        // TrainOutput::new(self, item.loss.backward(), item)
+    }
+}
+
+// TODO
+impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
+    fn step(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
+        todo!()
+        // self.forward_classification(item)
+    }
+}
+
 // equivalent to training.rs::run
-pub fn do_training<B: AutodiffBackend>(device: B::Device) {
-    // copied from mnsit example. IDK if it's any good.
+pub fn train<B: AutodiffBackend>(device: B::Device, train_data: impl Dataset<MyDataItem>, valid_data: impl Dataset<MyDataItem>) {
+    // copied from mnist example. IDK if it's any good.
     let config_optimizer = AdamConfig::new().with_weight_decay(Some(WeightDecayConfig::new(5e-5)));
 
     // TODO set params properly
     let config = MyTrainingConfig::new(config_optimizer);
 
+    let batcher_train = MyDataBatcher::<B>::new(device.clone());
+    let batcher_valid = MyDataBatcher::<B::InnerBackend>::new(device.clone());
 
-
+    let dataloader_train = DataLoaderBuilder::new(batcher_train)
+        .batch_size(1)
+        .shuffle(config.seed)
+        .num_workers(1)
+        .build(train_data);
+    let dataloader_test = DataLoaderBuilder::new(batcher_valid)
+        .batch_size(1)
+        .shuffle(config.seed)
+        .num_workers(1)
+        .build(valid_data);
 
 
     B::seed(config.seed);
 
-    let batcher_train = MyDataBatcher::<B>::new(device.clone());
-    let batcher_validate = MyDataBatcher::<B>::new(device.clone());
+    let my_model = MyModel::<B>::new(device.clone(), WINDOW_SIZE * 2, VOCAB_SIZE);
 
-    todo!()
-    // let my_model = MyModel::new(device.clone());
+    let learner = LearnerBuilder::new(ARTIFACT_DIR)
+        .metric_train_numeric(AccuracyMetric::new())
+        .metric_valid_numeric(AccuracyMetric::new())
+        .metric_train_numeric(CpuUse::new())
+        .metric_valid_numeric(CpuUse::new())
+        .metric_train_numeric(CpuMemory::new())
+        .metric_valid_numeric(CpuMemory::new())
+        .metric_train_numeric(CpuTemperature::new())
+        .metric_valid_numeric(CpuTemperature::new())
+        .metric_train_numeric(LossMetric::new())
+        .metric_valid_numeric(LossMetric::new())
+        .with_file_checkpointer(CompactRecorder::new())
+        .devices(vec![device.clone()])
+        .num_epochs(config.num_epochs)
+        // TODO not sure about this?
+        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
+            Aggregate::Mean,
+            Direction::Lowest,
+            Split::Valid,
+            StoppingCondition::NoImprovementSince { n_epochs: 1 },
+        ))
+        // TODO do I need an optimizer
+        .build(my_model, config.optimizer.init(), /* lr_scheduler. no idea what this does*/ 1e-4)
+        ;
 
-    // let learner = LearnerBuilder::<B>::new(ARTIFACT_DIR)
-    //     .metric_train_numeric(AccuracyMetric::new())
-    //     .metric_valid_numeric(AccuracyMetric::new())
-    //     .metric_train_numeric(CpuUse::new())
-    //     .metric_valid_numeric(CpuUse::new())
-    //     .metric_train_numeric(CpuMemory::new())
-    //     .metric_valid_numeric(CpuMemory::new())
-    //     .metric_train_numeric(CpuTemperature::new())
-    //     .metric_valid_numeric(CpuTemperature::new())
-    //     .metric_train_numeric(LossMetric::new())
-    //     .metric_valid_numeric(LossMetric::new())
-    //     .with_file_checkpointer(CompactRecorder::new())
-    //     .devices(vec![device.clone()])
-    //     .num_epochs(config.num_epochs)
-    //     // TODO not sure about this?
-    //     .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
-    //         Aggregate::Mean,
-    //         Direction::Lowest,
-    //         Split::Valid,
-    //         StoppingCondition::NoImprovementSince { n_epochs: 1 },
-    //     ))
-    //     // TODO do I need an optimizer
-    //     .build(my_model, config.optimizer.init(), /* lr_scheduler. no idea what this does*/ 1e-4)
-    //     ;
+    let model_trained = learner.fit(dataloader_train, dataloader_test);
+    config
+        .save(format!("{ARTIFACT_DIR}/config.json").as_str())
+        .unwrap();
 
-
-
-
-
+    model_trained
+        .save_file(
+            format!("{ARTIFACT_DIR}/model"),
+            &NoStdTrainingRecorder::new(),
+        )
+        .expect("Failed to save trained model");
 
     //
-    // let model = MyModel::new(device);
+    let model = MyModel::new(device);
     // burn::nn::Embedding::new(10, 10, &device);
     //
     // // let mut optimizer = burn::nn::Adam::new(model.parameters(), 0.001);
@@ -198,8 +325,8 @@ pub fn do_training<B: AutodiffBackend>(device: B::Device) {
 
 
 impl<B: Backend> MyModel<B> {
-    pub fn new(device: B::Device) -> Self {
-        let embedded_config = EmbeddingConfig::new(todo!(), todo!());
+    pub fn new(device: B::Device, num_embedding_vecs: usize, size_each_vec: usize) -> Self {
+        let embedded_config = EmbeddingConfig::new(num_embedding_vecs, size_each_vec);
         let embedded = embedded_config.init(&device);
 
         Self {
