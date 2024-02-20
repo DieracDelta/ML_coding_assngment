@@ -18,6 +18,8 @@ static DATA_DIR: &str = "data/real_data/data";
 const WINDOW_SIZE: usize = 2;
 const VOCAB_SIZE: usize = 2180152;
 const EMBEDDING_SIZE: usize = 256;
+const NUM_UNRELATED_SAMPLES: usize = 512;
+const UNRELATED_SAMPLE_SIZE: usize = 256;
 
 pub type DEVICE = burn::backend::ndarray::NdArray;
 
@@ -68,10 +70,14 @@ pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u3
             let track_idx = *mapping.get(&(input_track.artist_name.to_lowercase(), input_track.track_name.to_lowercase())).unwrap() as i32;
 
 
+            // TODO get random sample size
+
+
 
             dataset.push(MyDataItem {
                 input: one_hot_vec(track_idx),
-                output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap()
+                output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
+                unrelated_samples: todo!()
             });
         }
     }
@@ -82,7 +88,8 @@ pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u3
 #[derive(Clone, Debug)]
 pub struct MyDataItem {
     input: [i32; VOCAB_SIZE],
-    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2]
+    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2],
+    unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
 }
 
 pub fn gen_mapping(dataset: HashSet<(String, String)>) -> HashMap<(String, String), u32>{
@@ -177,7 +184,10 @@ pub struct MyDataBatch<B: Backend> {
     pub song_artist_as_vec_list: Tensor<B, 2, Int>,
     // targets is a vector of vectors
     pub targets: Tensor<B, 3, Int>,
-    _pd: PhantomData<B>
+    // before batch [[onehot vec]; num_unrelated]
+    // after batching, [[[onehot vec]; num_unrelated]; batch_size]
+    // so dimension is 3
+    pub unrelated_samples: Tensor<B, 3, Int>,
 }
 
 pub struct MyDataBatcher<B: Backend + 'static> {
@@ -206,10 +216,18 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
             .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
             .collect()
             ;
+
+        let unrelated_samples : Vec<Tensor<B, 2, Int>> =
+            items
+            .iter()
+            .map(|item| Data::<i32, 2>::from(item.unrelated_samples))
+            .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
+            .collect()
+            ;
         MyDataBatch {
             song_artist_as_vec_list: Tensor::stack(inputs, 0).to_device(&self.device),
             targets: Tensor::stack(outputs, 0).to_device(&self.device),
-            _pd: PhantomData,
+            unrelated_samples: Tensor::stack(unrelated_samples, 0).to_device(&self.device),
         }
     }
 }
@@ -233,7 +251,7 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 }
 
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
-    fn step(&self, MyDataBatch { song_artist_as_vec_list, targets, _pd } : MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+    fn step(&self, MyDataBatch { song_artist_as_vec_list, targets, unrelated_samples } : MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
         // let input = song_artist_as_vec_list;
         // /// need to cat all the tensors together.
         // let output = Tensor::reshape(targets, todo!());
@@ -252,6 +270,10 @@ impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<
     fn step(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
         todo!()
         // self.forward_classification(item)
+    }
+
+    fn forward(&self, item: MyDataBatch<B>) {
+
     }
 }
 
