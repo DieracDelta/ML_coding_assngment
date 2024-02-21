@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, marker::PhantomData};
 
-use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::Module, nn::{Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, AdamConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
+use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::Module, nn::{loss::Reduction, Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, AdamConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
 use burn::tensor::ElementConversion;
 use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
@@ -271,10 +271,6 @@ impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<
         todo!()
         // self.forward_classification(item)
     }
-
-    fn forward(&self, item: MyDataBatch<B>) {
-
-    }
 }
 
 // equivalent to training.rs::run
@@ -379,9 +375,47 @@ impl<B: Backend> MyModel<B> {
 
     }
 
-    pub fn forward<const N: usize>(&self, input: Tensor<B, N>) -> Tensor<B, N> {
+    pub fn forward<const D: usize>(
+        &self,
+        logits: Tensor<B, D>,
+        targets: Tensor<B, D>,
+        reduction: Reduction
+    ) -> Tensor<B, 1> {
+
         todo!()
     }
+
+    pub fn backward(&self) {
+        todo!()
+    }
+
+}
+
+/// noncontrastive loss
+pub struct NceLoss<B: Backend> {
+    _pd: PhantomData<B>
+
+}
+
+impl<B: Backend> NceLoss<B> {
+
+    pub fn forward<const D: usize>(
+        &self,
+        logits: Tensor<B, D>,
+        targets: Tensor<B, D>,
+        reduction: Reduction
+    ) -> Tensor<B, 1> {
+        todo!()
+
+    }
+    pub fn forward_no_reduction<const D: usize>(
+        &self,
+        logits: Tensor<B, D>,
+        targets: Tensor<B, D>
+    ) -> Tensor<B, D> {
+        todo!()
+    }
+
 
 }
 
