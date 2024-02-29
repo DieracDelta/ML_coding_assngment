@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, marker::PhantomData};
 
-use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::Module, nn::{loss::Reduction, Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, AdamConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
+use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::{Module, Param}, nn::{loss::Reduction, Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, momentum::MomentumConfig, AdamConfig, Sgd, SgdConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
 use burn::tensor::ElementConversion;
 use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 // - implement loss correctly
 // - fix gradient descent to match textbook
 // - check windowing behaviour, it might be wrong..
+// - match embedding layer init/config settings to tf code
 
 static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
@@ -20,6 +21,7 @@ const VOCAB_SIZE: usize = 2180152;
 const EMBEDDING_SIZE: usize = 256;
 const NUM_UNRELATED_SAMPLES: usize = 512;
 const UNRELATED_SAMPLE_SIZE: usize = 256;
+const LEARNING_RATE: f64 = 0.1;
 
 pub type DEVICE = burn::backend::ndarray::NdArray;
 
@@ -173,7 +175,7 @@ pub struct MyTrainingConfig {
     #[config(default = 128)]
     pub batch_size: usize,
 
-    pub optimizer: AdamConfig
+    pub optimizer: SgdConfig
 }
 
 struct PlaylistToItems;
@@ -252,6 +254,9 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
     fn step(&self, MyDataBatch { song_artist_as_vec_list, targets, unrelated_samples } : MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+        // compute
+
+
         // let input = song_artist_as_vec_list;
         // /// need to cat all the tensors together.
         // let output = Tensor::reshape(targets, todo!());
@@ -276,7 +281,8 @@ impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<
 // equivalent to training.rs::run
 pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyDataItem>, valid_data: InMemDataset<MyDataItem>, batch_size: usize, num_epochs: usize, seed: u64) {
     // copied from mnist example. IDK if it's any good.
-    let config_optimizer = AdamConfig::new().with_weight_decay(Some(WeightDecayConfig::new(5e-5)));
+    // let config_optimizer = AdamConfig::new().with_weight_decay(Some(WeightDecayConfig::new(5e-5)));
+    let config_optimizer = SgdConfig::new();
 
     // TODO set params properly
     let config = MyTrainingConfig::new(config_optimizer)
@@ -322,14 +328,14 @@ pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyD
         .devices(vec![device.clone()])
         .num_epochs(config.num_epochs)
         // TODO not sure about this?
-        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
-            Aggregate::Mean,
-            Direction::Lowest,
-            Split::Valid,
-            StoppingCondition::NoImprovementSince { n_epochs: 1 },
-        ))
+        // .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
+        //     Aggregate::Mean,
+        //     Direction::Lowest,
+        //     Split::Valid,
+        //     StoppingCondition::NoImprovementSince { n_epochs: 1 },
+        // ))
         // TODO do I need an optimizer
-        .build(my_model, config.optimizer.init(), /* lr_scheduler. no idea what this does*/ 1e-4)
+        .build(my_model, config.optimizer.init(), LEARNING_RATE)
         ;
 
     let model_trained = learner.fit(dataloader_train, dataloader_test);
@@ -393,8 +399,21 @@ impl<B: Backend> MyModel<B> {
 
 /// noncontrastive loss
 pub struct NceLoss<B: Backend> {
-    _pd: PhantomData<B>
+    // same dimension as the embedding weights
+    weights: Param<Tensor<B, 2>>,
+    // size of vocabulary
+    bias: Param<Tensor<B, 1>>,
+    // for debugging only
+    _config: NceLossConfig
+}
 
+pub struct BinaryLogisticRegression {
+
+}
+
+pub struct NceLossConfig {
+    num_embeddings: usize,
+    vocab_size: usize,
 }
 
 impl<B: Backend> NceLoss<B> {
@@ -408,6 +427,7 @@ impl<B: Backend> NceLoss<B> {
         todo!()
 
     }
+
     pub fn forward_no_reduction<const D: usize>(
         &self,
         logits: Tensor<B, D>,

@@ -27,11 +27,10 @@
             '';
             RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
             # DYLD_LIBRARY_PATH = "${pkgs.openblas}/lib";
-            LD_LIBRARY_PATH = "${pkgs.openssl.out}/lib:${pkgs.libtorch-bin}/lib";
-            LIBTORCH="${pkgs.libtorch-bin}";
+            # LD_LIBRARY_PATH = "${pkgs.openssl.out}/lib:${pkgs.libtorch-bin}/lib";
+            # LIBTORCH="${pkgs.libtorch-bin}";
             buildInputs =
               with pkgs; [
-                libtorch-bin
                 openblas
                 # rust-src
                 pkg-config
