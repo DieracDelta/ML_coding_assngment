@@ -15,10 +15,11 @@ use serde::de::DeserializeOwned;
 
 static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
+static VALID_DIR: &str = "data/real_data/valid_data";
 
 const WINDOW_SIZE: usize = 1;
 // const VOCAB_SIZE: usize = 2180152;
-const VOCAB_SIZE: usize =  34232;
+const VOCAB_SIZE: usize =   35521 ;
 const EMBEDDING_SIZE: usize = 256;
 const NUM_UNRELATED_SAMPLES: usize = 512;
 const UNRELATED_SAMPLE_SIZE: usize = 256;
@@ -50,10 +51,10 @@ pub fn main() {
 
     let mapping = gen_mapping(vocab);
 
-    let data_items = gen_data_items(&dataset, mapping);
-    let validation_data = InMemDataset::<MyDataItem>::new(vec![]);
-    panic!("WE NEARLY DONE");
-    train::<Autodiff<DEVICE>>(device, data_items, validation_data, 1, 5, 42);
+    let data_items = gen_data_items(&dataset, mapping.clone());
+    let data_items_repeat = gen_data_items(&dataset, mapping);
+    // panic!("WE NEARLY DONE");
+    train::<Autodiff<DEVICE>>(device, data_items, data_items_repeat, 1, 5, 42);
 
 
 
@@ -297,6 +298,7 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
             let mut playlist = file.playlists;
             dataset.append(&mut playlist);
         }
+        break;
     }
     InMemDataset::new(dataset)
 }
@@ -326,8 +328,8 @@ impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for 
 
 // TODO
 impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
-    fn step(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
-        todo!()
+    fn step(&self, batch: MyDataBatch<B>) -> ClassificationOutput<B> {
+        self.forward_classification(batch)
     }
 }
 
@@ -387,12 +389,12 @@ pub fn train<B: AutodiffBackend>(
         .devices(vec![device.clone()])
         .num_epochs(config.num_epochs)
         // stop early if no improvement
-        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
-            Aggregate::Mean,
-            Direction::Lowest,
-            Split::Valid,
-            StoppingCondition::NoImprovementSince { n_epochs: 1 },
-        ))
+        // .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
+        //     Aggregate::Mean,
+        //     Direction::Lowest,
+        //     Split::Valid,
+        //     StoppingCondition::NoImprovementSince { n_epochs: 1 },
+        // ))
         // TODO do I need an optimizer
         .build(my_model, config.optimizer.init(), LEARNING_RATE)
         ;
@@ -456,10 +458,14 @@ impl<B: Backend> MyModel<B> {
         // let [batch_size, height, width] = input.dims();
         // TODO might be wrong way, eg width*batch_size instead
         // let input_resized = input.reshape([batch_size * height, width]);
+        println!("BEFORE EMBED");
         let after_embed = self.embedded.forward(Tensor::stack(vec![input], 0));
+        println!("AFTER EMBED");
         let after_hidden = self.linear.forward(after_embed);
+        println!("AFTER HIDDEN");
         // TODO find out what dimension this is
         let after_softmax = softmax::<2, B>(after_hidden.reshape([1, EMBEDDING_SIZE]), 0);
+        println!("AFTER SOFTMAX");
 
 
         after_softmax
@@ -468,7 +474,9 @@ impl<B: Backend> MyModel<B> {
     pub fn forward_classification(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
         let targets = item.targets;
         let output = self.forward(item.inputs);
+        println!("BEFORE LOSS");
         let loss_calculation = self.loss.forward(output.clone(), targets.clone());
+        println!("AFTER LOSS");
 
         ClassificationOutput {
             loss: loss_calculation,
