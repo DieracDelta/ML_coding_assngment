@@ -17,7 +17,8 @@ static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
 
 const WINDOW_SIZE: usize = 1;
-const VOCAB_SIZE: usize = 2180152;
+// const VOCAB_SIZE: usize = 2180152;
+const VOCAB_SIZE: usize =  34232;
 const EMBEDDING_SIZE: usize = 256;
 const NUM_UNRELATED_SAMPLES: usize = 512;
 const UNRELATED_SAMPLE_SIZE: usize = 256;
@@ -42,6 +43,7 @@ pub fn main() {
     // panic!("And we're done {:?}", stacked_data);
     let dataset = load_json_playlists(DATA_DIR.to_string());
     let (vocab, vocab_size) = gen_stats(&dataset);
+    println!("SIZE OF VOCAB IS {:?}", vocab_size);
     // println!("DATASET: {:?}", <InMemDataset<_> as Dataset<_>>::get(&dataframe, 0));
     //
     println!("num distinct tracks: {:?}", vocab_size);
@@ -50,6 +52,7 @@ pub fn main() {
 
     let data_items = gen_data_items(&dataset, mapping);
     let validation_data = InMemDataset::<MyDataItem>::new(vec![]);
+    panic!("WE NEARLY DONE");
     train::<Autodiff<DEVICE>>(device, data_items, validation_data, 1, 5, 42);
 
 
@@ -64,11 +67,19 @@ pub fn one_hot_vec(idx: i32) -> [i32; VOCAB_SIZE] {
     output
 }
 
+pub fn one_hot_vec_2d(idx: i32) -> Box<[[i32; VOCAB_SIZE]; 1]> {
+    let mut output = Box::new([[0; VOCAB_SIZE]; 1]);
+    output[0][idx as usize] = 1;
+    output
+}
+
 /// generate some data items from a hashmap + playlists
 pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, String), u32>) -> InMemDataset<MyDataItem>{
+
     let mut dataset : Vec<MyDataItem> = vec![];
 
     for playlist in data.iter() {
+
         let tracks = playlist.tracks;
         for window in tracks.windows(2) {
             // let outputs : Vec<Track> = window[0..WINDOW_SIZE].iter().chain(window[WINDOW_SIZE + 2..].iter()).cloned().collect();
@@ -84,20 +95,20 @@ pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, S
             // TODO get random sample size for negative sampling (if you get to it)
 
             dataset.push(MyDataItem {
-                input: one_hot_vec(track_idx),
-                output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
-                _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
+                input: Box::new(one_hot_vec(track_idx)),
+                output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec_2d(idx)).collect::<Vec<_>>()[0].clone(),
+                // _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
                 // unrelated_samples: todo!()
             });
 
-            let track_idx = *mapping.get(&(outputs[0].artist_name.to_lowercase(), outputs[0].track_name.to_lowercase())).unwrap() as i32;
+            // let track_idx = *mapping.get(&(outputs[0].artist_name.to_lowercase(), outputs[0].track_name.to_lowercase())).unwrap() as i32;
 
-            dataset.push(MyDataItem {
-                input: one_hot_vec(track_idx),
-                output: input_track.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
-                _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
-                // unrelated_samples: todo!()
-            });
+            // dataset.push(MyDataItem {
+            //     input: *one_hot_vec(track_idx),
+            //     output: input_track.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| *one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
+            //     _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
+            //     // unrelated_samples: todo!()
+            // });
         }
     }
 
@@ -106,10 +117,10 @@ pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, S
 
 #[derive(Clone, Debug)]
 pub struct MyDataItem {
-    input: [i32; VOCAB_SIZE],
-    output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2],
+    input: Box<[i32; VOCAB_SIZE]>,
+    output: Box<[[i32; VOCAB_SIZE]; 1]>,
     // unused for now, since this is simple
-    _unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
+    // _unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
 }
 
 // maps from (song_name, author) -> uid
@@ -245,12 +256,12 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
         let inputs : Vec<Tensor<B, 1, Int>> =
             items
             .iter()
-            .map(|item| Data::<i32,1>::from(item.input))
+            .map(|item| Data::<i32,1>::from(*item.input))
             .map(|data| Tensor::<B, 1, Int>::from_data(data.convert(), &self.device)).collect();
         let outputs : Vec<Tensor<B, 2, Int>> =
             items
             .iter()
-            .map(|item| Data::<i32, 2>::from(item.output))
+            .map(|item| Data::<i32, 2>::from(*item.output))
             .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
             .collect()
             ;
