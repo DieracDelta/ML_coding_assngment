@@ -1,8 +1,8 @@
-use std::{collections::{HashMap, HashSet}, marker::PhantomData};
+use std::{collections::{HashMap, HashSet}};
 
-use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::{Module, Param}, nn::{loss::Reduction, Embedding, EmbeddingConfig}, optim::{decay::WeightDecayConfig, momentum::MomentumConfig, AdamConfig, Sgd, SgdConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
+use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::{Module, Param}, nn::{loss::{CrossEntropyLoss, CrossEntropyLossConfig, Reduction}, Embedding, EmbeddingConfig, Linear, LinearConfig}, optim::{decay::WeightDecayConfig, momentum::MomentumConfig, AdamConfig, Sgd, SgdConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{activation::softmax, backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
 use burn::tensor::ElementConversion;
-use burn::tensor::Int;
+use burn::tensor::{Int, Float};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 
@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
 static DATA_DIR: &str = "data/real_data/data";
 
-const WINDOW_SIZE: usize = 2;
+const WINDOW_SIZE: usize = 1;
 const VOCAB_SIZE: usize = 2180152;
 const EMBEDDING_SIZE: usize = 256;
 const NUM_UNRELATED_SAMPLES: usize = 512;
@@ -30,23 +30,27 @@ pub fn main() {
     use burn::backend::ndarray::{NdArrayDevice};
     let device = NdArrayDevice::Cpu;
 
-    let data : [[[i32; 3]; 2]; 2] = [[[1, 2, 3], [4, 5, 6]], [[1, 2, 3], [4, 5, 6]]];
-    let mapped_data : Vec<Tensor<Autodiff<DEVICE>, 2, Int>> = data.into_iter().map(|item| Data::<i32, 2>::from(item))
-        .map(|data| Tensor::<Autodiff<DEVICE>, 2, Int>::from_data(data.convert(), &device))
-        .collect()
+    // let data : [[[i32; 3]; 2]; 2] = [[[1, 2, 3], [4, 5, 6]], [[1, 2, 3], [4, 5, 6]]];
+    // let mapped_data : Vec<Tensor<Autodiff<DEVICE>, 2, Int>> = data.into_iter().map(|item| Data::<i32, 2>::from(item))
+    //     .map(|data| Tensor::<Autodiff<DEVICE>, 2, Int>::from_data(data.convert(), &device))
+    //     .collect()
+    //
+    //     ;
+    //
+    // let stacked_data = Tensor::<Autodiff<DEVICE>, 2, Int>::stack::<3>(mapped_data, 0);
 
-        ;
-
-    let stacked_data = Tensor::<Autodiff<DEVICE>, 2, Int>::stack::<3>(mapped_data, 0);
-
-    panic!("And we're done {:?}", stacked_data);
+    // panic!("And we're done {:?}", stacked_data);
     let dataset = load_json_playlists(DATA_DIR.to_string());
-    let (vocab, vocab_size) = gen_stats(dataset);
+    let (vocab, vocab_size) = gen_stats(&dataset);
     // println!("DATASET: {:?}", <InMemDataset<_> as Dataset<_>>::get(&dataframe, 0));
     //
     println!("num distinct tracks: {:?}", vocab_size);
 
     let mapping = gen_mapping(vocab);
+
+    let data_items = gen_data_items(&dataset, mapping);
+    let validation_data = InMemDataset::<MyDataItem>::new(vec![]);
+    train::<Autodiff<DEVICE>>(device, data_items, validation_data, 1, 5, 42);
 
 
 
@@ -60,26 +64,39 @@ pub fn one_hot_vec(idx: i32) -> [i32; VOCAB_SIZE] {
     output
 }
 
-pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u32>) -> InMemDataset<MyDataItem>{
+/// generate some data items from a hashmap + playlists
+pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, String), u32>) -> InMemDataset<MyDataItem>{
     let mut dataset : Vec<MyDataItem> = vec![];
 
-    for playlist in data {
+    for playlist in data.iter() {
         let tracks = playlist.tracks;
-        for window in tracks.windows(WINDOW_SIZE * 2 + 1) {
-            let outputs : Vec<Track> = window[0..WINDOW_SIZE].iter().chain(window[WINDOW_SIZE + 2..].iter()).cloned().collect();
+        for window in tracks.windows(2) {
+            // let outputs : Vec<Track> = window[0..WINDOW_SIZE].iter().chain(window[WINDOW_SIZE + 2..].iter()).cloned().collect();
 
-            let input_track = &window[WINDOW_SIZE + 1];
-            let track_idx = *mapping.get(&(input_track.artist_name.to_lowercase(), input_track.track_name.to_lowercase())).unwrap() as i32;
+            let input_track : Vec<Track> = vec![window[0].clone()];
+            let outputs : Vec<Track> = vec![window[1].clone()];
+            // let input_track = &window[WINDOW_SIZE + 1];
+
+            // let input_track = &window[WINDOW_SIZE + 1];
+            let track_idx = *mapping.get(&(input_track[0].artist_name.to_lowercase(), input_track[0].track_name.to_lowercase())).unwrap() as i32;
 
 
-            // TODO get random sample size
-
-
+            // TODO get random sample size for negative sampling (if you get to it)
 
             dataset.push(MyDataItem {
                 input: one_hot_vec(track_idx),
                 output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
-                unrelated_samples: todo!()
+                _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
+                // unrelated_samples: todo!()
+            });
+
+            let track_idx = *mapping.get(&(outputs[0].artist_name.to_lowercase(), outputs[0].track_name.to_lowercase())).unwrap() as i32;
+
+            dataset.push(MyDataItem {
+                input: one_hot_vec(track_idx),
+                output: input_track.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec(idx)).collect::<Vec<_>>().try_into().unwrap(),
+                _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
+                // unrelated_samples: todo!()
             });
         }
     }
@@ -91,14 +108,16 @@ pub fn gen_data_items(data: Vec<PlayList>, mapping: HashMap<(String, String), u3
 pub struct MyDataItem {
     input: [i32; VOCAB_SIZE],
     output: [[i32; VOCAB_SIZE]; WINDOW_SIZE * 2],
-    unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
+    // unused for now, since this is simple
+    _unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
 }
 
+// maps from (song_name, author) -> uid
 pub fn gen_mapping(dataset: HashSet<(String, String)>) -> HashMap<(String, String), u32>{
     dataset.iter().enumerate().map(|(i, x)| (x.clone(), i as u32)).collect()
 }
 
-pub fn gen_stats(dataset: InMemDataset<PlayList>) -> (HashSet<(String, String)>, usize) {
+pub fn gen_stats(dataset: &InMemDataset<PlayList>) -> (HashSet<(String, String)>, usize) {
     let mut all_songs :HashSet<(String, String)> = HashSet::new();
 
     for playlist in dataset.iter() {
@@ -113,6 +132,9 @@ pub fn gen_stats(dataset: InMemDataset<PlayList>) -> (HashSet<(String, String)>,
 #[derive(Module, Debug)]
 pub struct MyModel<B: Backend> {
     embedded: Embedding<B>,
+    linear: Linear<B>,
+    loss: CrossEntropyLoss<B>
+    // activation: CrossEntropyLoss<B>
 }
 
 impl<B: Backend> MyModel<B> {
@@ -183,13 +205,14 @@ struct PlaylistToItems;
 #[derive(Clone, Debug)]
 pub struct MyDataBatch<B: Backend> {
     // name is a vector
-    pub song_artist_as_vec_list: Tensor<B, 2, Int>,
-    // targets is a vector of vectors
-    pub targets: Tensor<B, 3, Int>,
+    pub inputs: Tensor<B, 1, Int>,
+    // XX not anymore targets is a vector of vectors
+    // target is a vector of what is expected
+    pub targets: Tensor<B, 1, Int>,
     // before batch [[onehot vec]; num_unrelated]
     // after batching, [[[onehot vec]; num_unrelated]; batch_size]
     // so dimension is 3
-    pub unrelated_samples: Tensor<B, 3, Int>,
+    // pub unrelated_samples: Tensor<B, 3, Int>,
 }
 
 pub struct MyDataBatcher<B: Backend + 'static> {
@@ -206,6 +229,19 @@ impl<B: Backend> MyDataBatcher<B> {
 
 impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
     fn batch(&self, items: Vec<MyDataItem>) -> MyDataBatch<B> {
+        // let inputs : Vec<Tensor<B, 1, Int>> =
+        //     items
+        //     .iter()
+        //     .map(|item| Data::<i32,1>::from(item.input))
+        //     .map(|data| Tensor::<B, 1, Int>::from_data(data.convert(), &self.device)).collect();
+        // let outputs : Vec<Tensor<B, 2, Int>> =
+        //     items
+        //     .iter()
+        //     .map(|item| Data::<i32, 2>::from(item.output))
+        //     .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
+        //     .collect()
+        //     ;
+
         let inputs : Vec<Tensor<B, 1, Int>> =
             items
             .iter()
@@ -219,17 +255,19 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
             .collect()
             ;
 
-        let unrelated_samples : Vec<Tensor<B, 2, Int>> =
-            items
-            .iter()
-            .map(|item| Data::<i32, 2>::from(item.unrelated_samples))
-            .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
-            .collect()
-            ;
+        // let unrelated_samples : Vec<Tensor<B, 2, Int>> =
+        //     items
+        //     .iter()
+        //     .map(|item| Data::<i32, 2>::from(item.unrelated_samples))
+        //     .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
+        //     .collect()
+        //     ;
         MyDataBatch {
-            song_artist_as_vec_list: Tensor::stack(inputs, 0).to_device(&self.device),
-            targets: Tensor::stack(outputs, 0).to_device(&self.device),
-            unrelated_samples: Tensor::stack(unrelated_samples, 0).to_device(&self.device),
+            inputs : Tensor::stack(inputs, 0),
+            targets: Tensor::stack(outputs, 0) // TODO do I need to to_device it?
+            // inputs: Tensor::stack(inputs, 0).to_device(&self.device),
+            // targets: Tensor::stack(outputs, 0).to_device(&self.device),
+            // unrelated_samples: Tensor::stack(unrelated_samples, 0).to_device(&self.device),
         }
     }
 }
@@ -253,7 +291,13 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 }
 
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
-    fn step(&self, MyDataBatch { song_artist_as_vec_list, targets, unrelated_samples } : MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+    fn step(&self, batch: MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+
+        let classification = self.forward_classification(batch);
+
+        TrainOutput::new(self, classification.loss.backward(), classification)
+
+
         // compute
 
 
@@ -263,7 +307,6 @@ impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for 
         // self.embedded.forward();
 
 
-        todo!()
         // let item = self.forward_classification(item);
         //
         // TrainOutput::new(self, item.loss.backward(), item)
@@ -274,12 +317,17 @@ impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for 
 impl<B: Backend> ValidStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
     fn step(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
         todo!()
-        // self.forward_classification(item)
     }
 }
 
 // equivalent to training.rs::run
-pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyDataItem>, valid_data: InMemDataset<MyDataItem>, batch_size: usize, num_epochs: usize, seed: u64) {
+pub fn train<B: AutodiffBackend>(
+    device: B::Device,
+    train_data: InMemDataset<MyDataItem>,
+    valid_data: InMemDataset<MyDataItem>,
+    batch_size: usize,
+    num_epochs: usize,
+    seed: u64) {
     // copied from mnist example. IDK if it's any good.
     // let config_optimizer = AdamConfig::new().with_weight_decay(Some(WeightDecayConfig::new(5e-5)));
     let config_optimizer = SgdConfig::new();
@@ -311,7 +359,7 @@ pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyD
 
     B::seed(config.seed);
 
-    let my_model = MyModel::<B>::new(device.clone(), VOCAB_SIZE, EMBEDDING_SIZE);
+    let my_model = MyModel::<B>::new(device.clone());
 
     let learner = LearnerBuilder::new(ARTIFACT_DIR)
         .metric_train_numeric(AccuracyMetric::new())
@@ -327,13 +375,13 @@ pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyD
         .with_file_checkpointer(CompactRecorder::new())
         .devices(vec![device.clone()])
         .num_epochs(config.num_epochs)
-        // TODO not sure about this?
-        // .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
-        //     Aggregate::Mean,
-        //     Direction::Lowest,
-        //     Split::Valid,
-        //     StoppingCondition::NoImprovementSince { n_epochs: 1 },
-        // ))
+        // stop early if no improvement
+        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
+            Aggregate::Mean,
+            Direction::Lowest,
+            Split::Valid,
+            StoppingCondition::NoImprovementSince { n_epochs: 1 },
+        ))
         // TODO do I need an optimizer
         .build(my_model, config.optimizer.init(), LEARNING_RATE)
         ;
@@ -371,71 +419,52 @@ pub fn train<B: AutodiffBackend>(device: B::Device, train_data: InMemDataset<MyD
 
 
 impl<B: Backend> MyModel<B> {
-    pub fn new(device: B::Device, num_embedding_vecs: usize, embedding_size: usize) -> Self {
-        let embedded_config = EmbeddingConfig::new(num_embedding_vecs, embedding_size);
+    pub fn new(device: B::Device) -> Self {
+        let embedded_config = EmbeddingConfig::new(VOCAB_SIZE, EMBEDDING_SIZE);
         let embedded = embedded_config.init(&device);
+        let linear_config = LinearConfig::new(EMBEDDING_SIZE, VOCAB_SIZE);
+        let linear = linear_config.init(&device);
+        let cross_entropy_loss_config = CrossEntropyLossConfig::new();
+        let cross_entropy_loss = cross_entropy_loss_config.init(&device);
 
         Self {
-            embedded
+            embedded,
+            linear,
+            loss: cross_entropy_loss
         }
 
     }
 
-    pub fn forward<const D: usize>(
+    pub fn forward(
         &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>,
-        reduction: Reduction
-    ) -> Tensor<B, 1> {
+        input: Tensor<B, 1, Int>
+        // logits: Tensor<B, D>,
+        // targets: Tensor<B, D>,
+        // reduction: Reduction
+    ) -> Tensor<B, 2> {
+        // let [batch_size, height, width] = input.dims();
+        // TODO might be wrong way, eg width*batch_size instead
+        // let input_resized = input.reshape([batch_size * height, width]);
+        let after_embed = self.embedded.forward(Tensor::stack(vec![input], 0));
+        let after_hidden = self.linear.forward(after_embed);
+        // TODO find out what dimension this is
+        let after_softmax = softmax::<2, B>(after_hidden.reshape([1, EMBEDDING_SIZE]), 0);
 
-        todo!()
+
+        after_softmax
     }
 
-    pub fn backward(&self) {
-        todo!()
-    }
+    pub fn forward_classification(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
+        let targets = item.targets;
+        let output = self.forward(item.inputs);
+        let loss_calculation = self.loss.forward(output.clone(), targets.clone());
 
-}
-
-/// noncontrastive loss
-pub struct NceLoss<B: Backend> {
-    // same dimension as the embedding weights
-    weights: Param<Tensor<B, 2>>,
-    // size of vocabulary
-    bias: Param<Tensor<B, 1>>,
-    // for debugging only
-    _config: NceLossConfig
-}
-
-pub struct BinaryLogisticRegression {
-
-}
-
-pub struct NceLossConfig {
-    num_embeddings: usize,
-    vocab_size: usize,
-}
-
-impl<B: Backend> NceLoss<B> {
-
-    pub fn forward<const D: usize>(
-        &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>,
-        reduction: Reduction
-    ) -> Tensor<B, 1> {
-        todo!()
+        ClassificationOutput {
+            loss: loss_calculation,
+            output,
+            targets,
+        }
 
     }
 
-    pub fn forward_no_reduction<const D: usize>(
-        &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>
-    ) -> Tensor<B, D> {
-        todo!()
-    }
-
-
 }
-
