@@ -19,8 +19,6 @@
           overlays = [ ];
         };
         in {
-          # use clang 11 because nix's clang is 11
-          # annoying link errors if we try clang 15
           devShell = pkgs.mkShell.override {} {
             shellHook = ''
               export CARGO_TARGET_DIR="$(git rev-parse --show-toplevel)/target_dirs/nix_rustc";
@@ -31,6 +29,8 @@
             # LIBTORCH="${pkgs.libtorch-bin}";
             buildInputs =
               with pkgs; [
+                typst
+                typst-lsp
                 openblas
                 # rust-src
                 pkg-config
@@ -40,20 +40,14 @@
                 cargo-expand
                 # cargo
                 # rustc
-                nix
-                nix.dev
-                rust-cbindgen # for executable cbindgen
-                clang-tools_15 # for up to date clangd
-                clang_11
                 boost
-                protobuf
                 pkg-config
                 openssl.dev
                 openssl
               ] ++
               pkgs.lib.optionals stdenv.isDarwin [
                 darwin.apple_sdk.frameworks.Security
-                 pkgs.libiconv
+                pkgs.libiconv
                 darwin.apple_sdk.frameworks.SystemConfiguration
                 darwin.apple_sdk.frameworks.Accelerate
                 darwin.apple_sdk.frameworks.QuartzCore
