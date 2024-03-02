@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 // - check windowing behaviour, it might be wrong..
 // - match embedding layer init/config settings to tf code
 
-static ARTIFACT_DIR: &str = "/tmp/burn-example-mnist";
+static ARTIFACT_DIR: &str = "/tmp/burn-mylogs";
 static DATA_DIR: &str = "data/real_data/data";
 static VALID_DIR: &str = "data/real_data/valid_data";
 
@@ -23,7 +23,7 @@ const VOCAB_SIZE: usize =   35521 ;
 const EMBEDDING_SIZE: usize = 256;
 const NUM_UNRELATED_SAMPLES: usize = 512;
 const UNRELATED_SAMPLE_SIZE: usize = 256;
-const LEARNING_RATE: f64 = 0.1;
+const LEARNING_RATE: f64 = 1e-4;
 
 pub type DEVICE = burn::backend::ndarray::NdArray;
 
@@ -214,8 +214,6 @@ pub struct MyTrainingConfig {
     pub optimizer: SgdConfig
 }
 
-struct PlaylistToItems;
-
 #[derive(Clone, Debug)]
 pub struct MyDataBatch<B: Backend> {
     // name is a vector
@@ -243,6 +241,7 @@ impl<B: Backend> MyDataBatcher<B> {
 
 impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
     fn batch(&self, items: Vec<MyDataItem>) -> MyDataBatch<B> {
+        println!("BATCHING OH YEAH");
         // let inputs : Vec<Tensor<B, 1, Int>> =
         //     items
         //     .iter()
@@ -307,6 +306,8 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
     fn step(&self, batch: MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+        println!("STEPPING OH YEAH");
+        panic!("DOING A STEP!!!");
 
         let classification = self.forward_classification(batch);
 
@@ -349,7 +350,7 @@ pub fn train<B: AutodiffBackend>(
 
     // TODO set params properly
     let config = MyTrainingConfig::new(config_optimizer)
-        .with_batch_size(batch_size)
+        .with_batch_size(1 /* batch_size */)
         .with_num_epochs(num_epochs)
         .with_seed(seed)
         ;
@@ -375,37 +376,36 @@ pub fn train<B: AutodiffBackend>(
     B::seed(config.seed);
 
     let my_model = MyModel::<B>::new(device.clone());
-
-    let fake_random_data = Tensor::<B, 1, Int>::zeros(
-        [VOCAB_SIZE],
-        &device,
-    );
-
-    let fake_random_data_float = Tensor::<B, 1, Float>::zeros(
-        [VOCAB_SIZE],
-        &device,
-    );
-
-    let db = MyDataBatch {
-        inputs: fake_random_data_float.clone(),
-        targets: fake_random_data.clone(),
-    };
-
-    let _result = my_model.forward_classification(db);
-    panic!("FUCK");
+    //
+    // let fake_random_data = Tensor::<B, 1, Int>::zeros(
+    //     [VOCAB_SIZE],
+    //     &device,
+    // );
+    //
+    // let fake_random_data_float = Tensor::<B, 1, Float>::zeros(
+    //     [VOCAB_SIZE],
+    //     &device,
+    // );
+    //
+    // let db = MyDataBatch {
+    //     inputs: fake_random_data_float.clone(),
+    //     targets: fake_random_data.clone(),
+    // };
+    //
+    // let _result = my_model.forward_classification(db);
 
     let learner = LearnerBuilder::new(ARTIFACT_DIR)
-        .metric_train_numeric(AccuracyMetric::new())
-        .metric_valid_numeric(AccuracyMetric::new())
-        .metric_train_numeric(CpuUse::new())
-        .metric_valid_numeric(CpuUse::new())
-        .metric_train_numeric(CpuMemory::new())
-        .metric_valid_numeric(CpuMemory::new())
-        .metric_train_numeric(CpuTemperature::new())
-        .metric_valid_numeric(CpuTemperature::new())
-        .metric_train_numeric(LossMetric::new())
-        .metric_valid_numeric(LossMetric::new())
-        .with_file_checkpointer(CompactRecorder::new())
+        // .metric_train_numeric(AccuracyMetric::new())
+        // .metric_valid_numeric(AccuracyMetric::new())
+        // .metric_train_numeric(CpuUse::new())
+        // .metric_valid_numeric(CpuUse::new())
+        // .metric_train_numeric(CpuMemory::new())
+        // .metric_valid_numeric(CpuMemory::new())
+        // .metric_train_numeric(CpuTemperature::new())
+        // .metric_valid_numeric(CpuTemperature::new())
+        // .metric_train_numeric(LossMetric::new())
+        // .metric_valid_numeric(LossMetric::new())
+        // .with_file_checkpointer(CompactRecorder::new())
         .devices(vec![device.clone()])
         .num_epochs(config.num_epochs)
         // stop early if no improvement
@@ -420,16 +420,17 @@ pub fn train<B: AutodiffBackend>(
         ;
 
     let model_trained = learner.fit(dataloader_train, dataloader_test);
+    panic!("OML");
     config
         .save(format!("{ARTIFACT_DIR}/config.json").as_str())
         .unwrap();
 
-    // model_trained.clone()
-    //     .save_file(
-    //         format!("{ARTIFACT_DIR}/model"),
-    //         &NoStdTrainingRecorder::new(),
-    //     )
-    //     .expect("Failed to save trained model");
+    model_trained.clone()
+        .save_file(
+            format!("{ARTIFACT_DIR}/model"),
+            &NoStdTrainingRecorder::new(),
+        )
+        .expect("Failed to save trained model");
     // let fake_random_data = Tensor::<B, 1, Int>::zeros(
     //     [VOCAB_SIZE],
     //     &device,
@@ -483,13 +484,6 @@ impl<B: Backend> MyModel<B> {
         }
 
     }
-  //
-  //     Operation: 'Reshape'
-  // Reason:
-  //   1. The given shape doesn't have the same number of elements as the current tensor. Current shape: [1, 256], target shape: [1, 35521, 35521].
-  //      │ AFTER EMBED Shape { dims: [1, 35521, 256] }
-  //      │ AFTER HIDDEN Shape { dims: [1, 35521, 35521] }
-
     pub fn forward(
         &self,
         input: Tensor<B, 1, Float>
