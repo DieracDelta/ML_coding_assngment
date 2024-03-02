@@ -44,10 +44,10 @@ pub fn main() {
     // panic!("And we're done {:?}", stacked_data);
     let dataset = load_json_playlists(DATA_DIR.to_string());
     let (vocab, vocab_size) = gen_stats(&dataset);
-    println!("SIZE OF VOCAB IS {:?}", vocab_size);
+    // println!("SIZE OF VOCAB IS {:?}", vocab_size);
     // println!("DATASET: {:?}", <InMemDataset<_> as Dataset<_>>::get(&dataframe, 0));
     //
-    println!("num distinct tracks: {:?}", vocab_size);
+    // println!("num distinct tracks: {:?}", vocab_size);
 
     let mapping = gen_mapping(vocab);
 
@@ -241,7 +241,7 @@ impl<B: Backend> MyDataBatcher<B> {
 
 impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
     fn batch(&self, items: Vec<MyDataItem>) -> MyDataBatch<B> {
-        println!("BATCHING OH YEAH");
+        // println!("BATCHING OH YEAH");
         // let inputs : Vec<Tensor<B, 1, Int>> =
         //     items
         //     .iter()
@@ -306,7 +306,6 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
     fn step(&self, batch: MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
-        println!("STEPPING OH YEAH");
 
         let classification = self.forward_classification(batch);
 
@@ -496,17 +495,17 @@ impl<B: Backend> MyModel<B> {
         // TODO might be wrong way, eg width*batch_size instead
         // let input_resized = input.reshape([batch_size * height, width]);
         let pre_input : Tensor<B, 2, Float> = Tensor::stack(vec![input], 0);
-        println!("PREINPUT {:?}", pre_input.dims());
-        println!("PREINPUT {:?}", pre_input);
+        // println!("PREINPUT {:?}", pre_input.dims());
+        // println!("PREINPUT {:?}", pre_input);
         let after_embed = self.embedded.forward(pre_input);
-        println!("AFTER EMBED {:?}", after_embed.dims());
-        println!("AFTER EMBED {:?}", after_embed);
+        // println!("AFTER EMBED {:?}", after_embed.dims());
+        // println!("AFTER EMBED {:?}", after_embed);
         let after_hidden = self.linear.forward(after_embed);
-        println!("AFTER HIDDEN {:?}", after_hidden.dims());
+        // println!("AFTER HIDDEN {:?}", after_hidden.dims());
         // TODO find out what dimension this is
         let after_softmax = softmax::<2, B>(after_hidden, 1);
-        println!("AFTER SOFTMAX {:?}", after_softmax.dims());
-        println!("AFTER SOFTMAX {:?}", after_softmax);
+        // println!("AFTER SOFTMAX {:?}", after_softmax.dims());
+        // println!("AFTER SOFTMAX {:?}", after_softmax);
 
 
         after_softmax
@@ -515,12 +514,12 @@ impl<B: Backend> MyModel<B> {
     pub fn forward_classification(&self, item: MyDataBatch<B>) -> ClassificationOutput<B> {
         let targets = item.targets;
         let output = self.forward(item.inputs);
-        println!("BEFORE LOSS");
-        println!("TARGETS: {:?}", targets.dims());
-        println!("OUTPUTS: {:?}", output.dims());
+        // println!("BEFORE LOSS");
+        // println!("TARGETS: {:?}", targets.dims());
+        // println!("OUTPUTS: {:?}", output.dims());
 
         let loss_calculation = self.loss.forward(output.clone(), targets.clone());
-        println!("AFTER LOSS {:?}", loss_calculation);
+        // println!("AFTER LOSS {:?}", loss_calculation);
 
         ClassificationOutput {
             loss: loss_calculation,
