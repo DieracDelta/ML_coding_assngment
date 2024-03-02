@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}};
 
-use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::{Module, Param}, nn::{loss::{CrossEntropyLoss, CrossEntropyLossConfig, Reduction}, Embedding, EmbeddingConfig, Linear, LinearConfig}, optim::{decay::WeightDecayConfig, momentum::MomentumConfig, AdamConfig, Sgd, SgdConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{activation::softmax, backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
+use burn::{backend::Autodiff, config::Config, data::{dataloader::{batcher::Batcher, DataLoaderBuilder}, dataset::{Dataset, InMemDataset}}, module::{Module, Param}, nn::{loss::{CrossEntropyLoss, CrossEntropyLossConfig, Reduction}, Embedding, EmbeddingConfig, Linear, LinearConfig}, optim::{decay::WeightDecayConfig, momentum::MomentumConfig, AdamConfig, Sgd, SgdConfig}, record::{CompactRecorder, NoStdTrainingRecorder}, tensor::{activation::softmax, backend::{AutodiffBackend, Backend}, ops::IntTensorOps, Data, Distribution, Shape, Tensor}, train::{metric::{store::{Aggregate, Direction, Split}, AccuracyMetric, CpuMemory, CpuTemperature, CpuUse, LossMetric}, ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, StoppingCondition, TrainOutput, TrainStep, ValidStep}};
 use burn::tensor::ElementConversion;
 use burn::tensor::{Int, Float};
 use serde::{Deserialize, Serialize};
@@ -97,7 +97,9 @@ pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, S
 
             dataset.push(MyDataItem {
                 input: Box::new(one_hot_vec(track_idx)),
-                output: outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).map(|idx| one_hot_vec_2d(idx)).collect::<Vec<_>>()[0].clone(),
+                output: [outputs.iter().map(|track| *mapping.get(&(track.artist_name.to_lowercase(), track.track_name.to_lowercase())).unwrap() as i32).collect::<Vec<_>>()[0]]
+                    // .map(|idx| one_hot_vec_2d(idx)).collect::<Vec<_>>()[0].clone(),
+
                 // _unrelated_samples: [[0; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE]
                 // unrelated_samples: todo!()
             });
@@ -119,7 +121,7 @@ pub fn gen_data_items(data: &InMemDataset<PlayList>, mapping: HashMap<(String, S
 #[derive(Clone, Debug)]
 pub struct MyDataItem {
     input: Box<[i32; VOCAB_SIZE]>,
-    output: Box<[[i32; VOCAB_SIZE]; 1]>,
+    output: [i32; 1],
     // unused for now, since this is simple
     // _unrelated_samples: [[i32; VOCAB_SIZE]; UNRELATED_SAMPLE_SIZE],
 }
@@ -143,7 +145,7 @@ pub fn gen_stats(dataset: &InMemDataset<PlayList>) -> (HashSet<(String, String)>
 
 #[derive(Module, Debug)]
 pub struct MyModel<B: Backend> {
-    embedded: Embedding<B>,
+    embedded: Linear<B>,
     linear: Linear<B>,
     loss: CrossEntropyLoss<B>
     // activation: CrossEntropyLoss<B>
@@ -217,7 +219,7 @@ struct PlaylistToItems;
 #[derive(Clone, Debug)]
 pub struct MyDataBatch<B: Backend> {
     // name is a vector
-    pub inputs: Tensor<B, 1, Int>,
+    pub inputs: Tensor<B, 1, Float>,
     // XX not anymore targets is a vector of vectors
     // target is a vector of what is expected
     pub targets: Tensor<B, 1, Int>,
@@ -254,16 +256,16 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
         //     .collect()
         //     ;
 
-        let inputs : Vec<Tensor<B, 1, Int>> =
+        let inputs : Vec<Tensor<B, 1, Float>> =
             items
             .iter()
             .map(|item| Data::<i32,1>::from(*item.input))
-            .map(|data| Tensor::<B, 1, Int>::from_data(data.convert(), &self.device)).collect();
-        let outputs : Vec<Tensor<B, 2, Int>> =
+            .map(|data| Tensor::<B, 1, Float>::from_data(data.convert(), &self.device)).collect();
+        let outputs : Vec<Tensor<B, 1, Int>> =
             items
             .iter()
-            .map(|item| Data::<i32, 2>::from(*item.output))
-            .map(|data| Tensor::<B, 2, Int>::from_data(data.convert(), &self.device))
+            .map(|item| Data::<i32, 1>::from(item.output))
+            .map(|data| Tensor::<B, 1, Int>::from_data(data.convert(), &self.device))
             .collect()
             ;
 
@@ -374,6 +376,24 @@ pub fn train<B: AutodiffBackend>(
 
     let my_model = MyModel::<B>::new(device.clone());
 
+    let fake_random_data = Tensor::<B, 1, Int>::zeros(
+        [VOCAB_SIZE],
+        &device,
+    );
+
+    let fake_random_data_float = Tensor::<B, 1, Float>::zeros(
+        [VOCAB_SIZE],
+        &device,
+    );
+
+    let db = MyDataBatch {
+        inputs: fake_random_data_float.clone(),
+        targets: fake_random_data.clone(),
+    };
+
+    let _result = my_model.forward_classification(db);
+    panic!("FUCK");
+
     let learner = LearnerBuilder::new(ARTIFACT_DIR)
         .metric_train_numeric(AccuracyMetric::new())
         .metric_valid_numeric(AccuracyMetric::new())
@@ -404,12 +424,28 @@ pub fn train<B: AutodiffBackend>(
         .save(format!("{ARTIFACT_DIR}/config.json").as_str())
         .unwrap();
 
-    model_trained
-        .save_file(
-            format!("{ARTIFACT_DIR}/model"),
-            &NoStdTrainingRecorder::new(),
-        )
-        .expect("Failed to save trained model");
+    // model_trained.clone()
+    //     .save_file(
+    //         format!("{ARTIFACT_DIR}/model"),
+    //         &NoStdTrainingRecorder::new(),
+    //     )
+    //     .expect("Failed to save trained model");
+    // let fake_random_data = Tensor::<B, 1, Int>::zeros(
+    //     [VOCAB_SIZE],
+    //     &device,
+    // );
+    // let my_vec = [1i32; 5];
+    //
+    // let my_data =
+    //     Data::<i32, 1>::from(my_vec);
+
+    // let my_tensor : Tensor<B, 1, Int> = Tensor::<B, 1, Int>::from_data(my_data.convert(), &device);
+
+
+    // let result = model_trained.forward(fake_random_data);
+    // println!("RESULT IS {result:?}");
+
+
 
     //
 
@@ -433,7 +469,7 @@ pub fn train<B: AutodiffBackend>(
 
 impl<B: Backend> MyModel<B> {
     pub fn new(device: B::Device) -> Self {
-        let embedded_config = EmbeddingConfig::new(VOCAB_SIZE, EMBEDDING_SIZE);
+        let embedded_config = LinearConfig::new(VOCAB_SIZE, EMBEDDING_SIZE).with_bias(false);
         let embedded = embedded_config.init(&device);
         let linear_config = LinearConfig::new(EMBEDDING_SIZE, VOCAB_SIZE);
         let linear = linear_config.init(&device);
@@ -447,10 +483,16 @@ impl<B: Backend> MyModel<B> {
         }
 
     }
+  //
+  //     Operation: 'Reshape'
+  // Reason:
+  //   1. The given shape doesn't have the same number of elements as the current tensor. Current shape: [1, 256], target shape: [1, 35521, 35521].
+  //      │ AFTER EMBED Shape { dims: [1, 35521, 256] }
+  //      │ AFTER HIDDEN Shape { dims: [1, 35521, 35521] }
 
     pub fn forward(
         &self,
-        input: Tensor<B, 1, Int>
+        input: Tensor<B, 1, Float>
         // logits: Tensor<B, D>,
         // targets: Tensor<B, D>,
         // reduction: Reduction
@@ -458,14 +500,18 @@ impl<B: Backend> MyModel<B> {
         // let [batch_size, height, width] = input.dims();
         // TODO might be wrong way, eg width*batch_size instead
         // let input_resized = input.reshape([batch_size * height, width]);
-        println!("BEFORE EMBED");
-        let after_embed = self.embedded.forward(Tensor::stack(vec![input], 0));
-        println!("AFTER EMBED");
+        let pre_input : Tensor<B, 2, Float> = Tensor::stack(vec![input], 0);
+        println!("PREINPUT {:?}", pre_input.dims());
+        println!("PREINPUT {:?}", pre_input);
+        let after_embed = self.embedded.forward(pre_input);
+        println!("AFTER EMBED {:?}", after_embed.dims());
+        println!("AFTER EMBED {:?}", after_embed);
         let after_hidden = self.linear.forward(after_embed);
-        println!("AFTER HIDDEN");
+        println!("AFTER HIDDEN {:?}", after_hidden.dims());
         // TODO find out what dimension this is
-        let after_softmax = softmax::<2, B>(after_hidden.reshape([1, EMBEDDING_SIZE]), 0);
-        println!("AFTER SOFTMAX");
+        let after_softmax = softmax::<2, B>(after_hidden, 1);
+        println!("AFTER SOFTMAX {:?}", after_softmax.dims());
+        println!("AFTER SOFTMAX {:?}", after_softmax);
 
 
         after_softmax
@@ -475,8 +521,11 @@ impl<B: Backend> MyModel<B> {
         let targets = item.targets;
         let output = self.forward(item.inputs);
         println!("BEFORE LOSS");
-        let loss_calculation = self.loss.forward(output.clone(), targets.clone());
-        println!("AFTER LOSS");
+        println!("TARGETS: {:?}", targets.dims());
+        println!("OUTPUTS: {:?}", output.dims());
+
+        let loss_calculation = self.loss.forward(output.clone().transpose(), targets.clone());
+        println!("AFTER LOSS {:?}", loss_calculation);
 
         ClassificationOutput {
             loss: loss_calculation,
