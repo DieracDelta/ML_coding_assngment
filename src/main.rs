@@ -276,8 +276,8 @@ impl<B: Backend> Batcher<MyDataItem, MyDataBatch<B>> for MyDataBatcher<B> {
         //     .collect()
         //     ;
         MyDataBatch {
-            inputs : Tensor::stack(inputs, 0),
-            targets: Tensor::stack(outputs, 0) // TODO do I need to to_device it?
+            inputs : inputs[0].clone(),
+            targets: outputs[0].clone()
             // inputs: Tensor::stack(inputs, 0).to_device(&self.device),
             // targets: Tensor::stack(outputs, 0).to_device(&self.device),
             // unrelated_samples: Tensor::stack(unrelated_samples, 0).to_device(&self.device),
@@ -307,11 +307,12 @@ pub fn load_json_playlists(path: String) -> InMemDataset<PlayList> {
 impl<B: AutodiffBackend> TrainStep<MyDataBatch<B>, ClassificationOutput<B>> for MyModel<B> {
     fn step(&self, batch: MyDataBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
         println!("STEPPING OH YEAH");
-        panic!("DOING A STEP!!!");
 
         let classification = self.forward_classification(batch);
 
-        TrainOutput::new(self, classification.loss.backward(), classification)
+        let tmp = TrainOutput::new(self, classification.loss.backward(), classification);
+        panic!("FINISHED A STEP!!!");
+        tmp
 
 
         // compute
@@ -518,7 +519,7 @@ impl<B: Backend> MyModel<B> {
         println!("TARGETS: {:?}", targets.dims());
         println!("OUTPUTS: {:?}", output.dims());
 
-        let loss_calculation = self.loss.forward(output.clone().transpose(), targets.clone());
+        let loss_calculation = self.loss.forward(output.clone(), targets.clone());
         println!("AFTER LOSS {:?}", loss_calculation);
 
         ClassificationOutput {
