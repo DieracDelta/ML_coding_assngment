@@ -16,14 +16,22 @@ burn = { version = "0.12.1", features = [
         "autodiff",
         "doc",
         "burn-train",
-        "vision",
-        "fusion",
-        "experimental-named-tensor",
+        # "vision",
+        # "fusion",
+        # "experimental-named-tensor",
         # "metal", # only macos
         "ndarray",
         "record-item-custom-serde",
         # "accelerate",
         "wgpu"
 ]}
+bimap = "0.6.3"
 serde_json = { version = "1.0.113" }
 serde = { version = "1.0.196" }
+
+# [profile.release]
+# opt-level = 1
+# overflow-checks = true
+# debug = 2
+# strip = false
+# lto = "off"
