@@ -74,7 +74,7 @@ Let's discuss the literature for solving this problem using a word2vec style app
 
 Word2Vec is typically used for predicting future words based on a vocabulary and corpus of words. That is, Word2Vec is able to, given a context, predict future words (the Continuous Bag of Words model). And, alternatively, given a word, predict a context (the Skip-Gram model). This fits nicely in with music generation, where, given a context, we would like to generate a playlist.
 
-The #link("https://arxiv.org/pdf/1301.3781.pdf")[Original paper] is the original paper that proposes these two architectures. However, we are interested in the Skip-Gram model specifically, since it is aimed at generating context words. This is precisely what we are interested in when generating playlists.
+The #link("https://arxiv.org/pdf/1301.3781.pdf")[paper] proposes these two architectures. However, we are interested in the Skip-Gram model specifically, since it is aimed at generating context words. This is precisely what we are interested in when generating playlists.
 
 
 The skip-gram model begins with defining a vocabulary of all possible words. Then, it encodes inputs into "one-hot" vectors. That is, vectors where the ith word makes the ith index of the input vector 1. It then multiplies the words by an "embedding" layer that just embeds each word. This may be thought of as a matrix where each row. Notice that this is just a fully connected layer of a neural network with no bias. This step looks like (assuming vocabulary set $V$ and embedding size $|S|$):
@@ -87,14 +87,14 @@ Then, the output of the embedding layer is multiplied by another "projection" la
 
 == Optimizations
 
-The original paper's design was iterated on many times. #link("https://leimao.github.io/article/Word2Vec-Classic/")[This blogpost] goes into a in-depth discussion of possible optimizations. Two interesting optimizations include:
+The original paper's design was iterated on many times, and most of the implementations I looked at varied pretty far from the paper. #link("https://leimao.github.io/article/Word2Vec-Classic/")[This blogpost] goes into a in-depth discussion of possible optimizations. Two interesting optimizations include:
 
 - Avoiding blowup in the output vecs by simply batching terms, applying a projection layer, then having the output be a distribution over terms.
 - Employ non-contrastive estimation to train the output as a binary classifier that "good" when hitting the output words, and "bad" otherwise. This employs negative samples with each batch (all pairs in a context window are passed through in each batch, the error is computed use MLE (maximum liklihood estimate), then back-propped on a per-batch basis).
 
 == Other approaches
 
-TODO fill out with transformer and knearest neighbors
+One approach that did well on this dataset include using #link("https://www.researchgate.net/publication/328088745_Effective_Nearest-Neighbor_Music_Recommendations")[K-nearest neighbors] on features similar songs in a playlist. Another approach that seems to work well is #link("https://arxiv.org/pdf/2304.09061.pdf")[training llms] on the data then using those llms to continue existing playlists.
 
 = Implementation
 
